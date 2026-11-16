@@ -1,5 +1,5 @@
 // Service worker: prima prova la rete (versione sempre aggiornata), senza rete usa la copia salvata.
-const CACHE = 'nina-v11';
+const CACHE = 'nina-v12';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'firebase-config.js', 'lista.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/apple-touch-icon.png', 'img/bg-portrait.jpg', 'img/bg-landscape.jpg'];
 
