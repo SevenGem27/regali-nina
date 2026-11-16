@@ -1,6 +1,6 @@
 import { firebaseConfig } from './firebase-config.js';
 import { CHILD_NAME, LIST_ID } from './lista.js';
-const APP_VERSION = '14';
+const APP_VERSION = '15';
 
 /* ───────────── Utilità ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -176,13 +176,11 @@ function render() {
   if (S.preview) html += `<div class="banner">👀 <span>Anteprima: così la vedono parenti e amici.</span><button class="btn btn-fir btn-sm" data-action="preview">Esci</button></div>`;
   else if (edit && S.store.mode === 'demo') html += `<div class="banner">ℹ️ <span>Anteprima dimostrativa: i dati restano su questo dispositivo.</span></div>`;
 
-  html += `<h2 class="letter-title">Caro Babbo Natale,<br>vorrei…</h2>`;
-  html += free.map(it => giftCard(it, edit)).join('');
+  html += free.map((it, i) => giftCard(it, edit, i === 0)).join('');
 
   if (!free.length) {
-    html += S.items.length
-      ? `<div class="empty"><div class="big">🎁</div><p>Tutti i regali sono stati scelti.<br>Grazie!</p></div>`
-      : `<div class="empty"><div class="big">🎄</div><p>${edit ? 'Aggiungi il primo regalo' : 'La lista arriverà presto'}</p></div>`;
+    html += `<article class="gift letter"><div class="gh"><span class="script first">Caro Babbo Natale, vorrei…</span></div>
+      <p class="note">${S.items.length ? 'Tutti i regali sono stati scelti. Grazie di cuore! 🎄' : (edit ? 'Aggiungi il primo regalo con il pacco qui sotto.' : 'La lista arriverà presto ✨')}</p></article>`;
   }
 
   // Il genitore vede cosa è già stato preso (senza nomi); gli ospiti solo i propri
@@ -198,21 +196,39 @@ function render() {
   const homeBtn = canOfferHome() ? `<button class="btn btn-line btn-sm" data-action="home">📲 Aggiungi alla Home</button>` : '';
   if (!S.editor || homeBtn) html += `<div class="parents">${!S.editor ? `<button class="btn btn-line btn-sm" data-action="login">🔒 Area genitori</button>` : ''}${homeBtn}</div>`;
   html += `<div class="ver">v${APP_VERSION}${isStandalone() ? ' · app' : ''}</div>`;
-  app.innerHTML = `<main>${html}</main>${edit ? `<button class="btn btn-red fab" data-action="add">＋ Aggiungi regalo</button>` : ''}`;
+  app.innerHTML = `<main>${html}</main>${edit ? `<button class="fab-gift" data-action="add" aria-label="Aggiungi regalo"><img src="img/fab.png" alt="+ Aggiungi regalo" width="338" height="144"></button>` : ''}`;
   if (open) app.querySelector('details.taken')?.setAttribute('open', '');
 }
 
-function giftCard(it, edit) {
+// Piccola icona accanto al regalo, scelta dal nome
+const ICONS = [
+  [/cavall|dondol/, '🐴'], [/trenin|treno|locomotiv/, '🚂'], [/orsacch|orsett|orso|peluche|pupazz/, '🧸'],
+  [/bambol/, '🪆'], [/libr|fiab|storie/, '📚'], [/pall[ao]|calcio/, '⚽'], [/bici|tricicl|monopatt/, '🚲'],
+  [/macchin|auto|camion|trattor/, '🚗'], [/puzzle|incastr/, '🧩'], [/music|carillon|pianol|tambur|xilofon|canzon/, '🎵'],
+  [/lego|costruz|mattonc|cubi\b/, '🧱'], [/vestit|body|tutin|maglion|felp|pigiam|abitin|salopette/, '👗'],
+  [/scarp|calz|stivalett/, '🧦'], [/copert|plaid|sacco nanna|cusci/, '🛏️'], [/biberon|pappa|bavagl|seggiol/, '🍼'],
+  [/sonagl|giostrin/, '🔔'], [/dinosaur/, '🦕'], [/unicorn/, '🦄'], [/gatt/, '🐱'], [/cagnol|cane\b|cani\b/, '🐶'],
+  [/coniglio/, '🐰'], [/barc|nave/, '⛵'], [/aere/, '✈️'], [/cucin|pentol/, '🍳'], [/colori|pastell|pennarell|disegn/, '🖍️'],
+  [/bagnett|vasch|paperell/, '🛁'], [/passeggin|carrozzin/, '👶'], [/tappet|palestrin/, '🌈']
+];
+const iconFor = name => { const n = String(name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); for (const [re, e] of ICONS) if (re.test(n)) return e; return '⭐'; };
+
+function giftCard(it, edit, first) {
   const url = normalizeUrl(it.url);
   return `<article class="gift ${S.leaving.has(it.id) ? 'leaving' : ''}" data-gift="${esc(it.id)}">
-    <div class="top">
-      <h3>${esc(it.name)}</h3>
+    <div class="gh">
+      <span class="script ${first ? 'first' : ''}">${first ? 'Caro Babbo Natale, vorrei…' : 'E anche…'}</span>
       ${edit ? `<button class="edit" data-action="item-menu" data-id="${esc(it.id)}" aria-label="Modifica">⋯</button>` : ''}
     </div>
-    ${url ? `<div class="shop">${esc(shopOf(url))}</div>` : ''}
-    <div class="actions">
-      ${url ? `<a class="btn btn-line btn-sm" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Vedi nel negozio ↗</a>` : ''}
-      <button class="btn btn-red btn-sm" data-action="take" data-id="${esc(it.id)}">🎁 Lo regalo io</button>
+    <div class="gr">
+      <span class="ico" aria-hidden="true">${iconFor(it.name)}</span>
+      <div class="nm">
+        <h3>${esc(it.name)}</h3>
+        ${url ? `<a class="shop" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Vedi su ${esc(shopOf(url))} ↗</a>` : ''}
+      </div>
+      <button class="take" data-action="take" data-id="${esc(it.id)}" aria-label="Lo regalo io: ${esc(it.name)}">
+        <img src="img/gift.png" alt="" width="52" height="53"><span>Lo regalo io</span>
+      </button>
     </div>
   </article>`;
 }

@@ -1,7 +1,7 @@
 // Service worker: prima prova la rete (versione sempre aggiornata), senza rete usa la copia salvata.
-const CACHE = 'nina-v14';
+const CACHE = 'nina-v15';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'firebase-config.js', 'lista.js', 'manifest.webmanifest',
-  'icons/icon-192.png', 'icons/apple-touch-icon.png', 'img/bg-portrait.jpg', 'img/bg-landscape.jpg'];
+  'icons/icon-192.png', 'icons/apple-touch-icon.png', 'img/bg-app.jpg', 'img/gift.png', 'img/fab.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
