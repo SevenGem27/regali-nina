@@ -111,3 +111,7 @@ details.taken[open] summary::after{content:"－"}
 .hide{display:none!important}
 :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* Tasto discreto per mamma e papà, in fondo alla lista */
+.parents{text-align:center;margin:26px 0 0}
+.parents .btn{background:rgba(255,250,243,.8);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}

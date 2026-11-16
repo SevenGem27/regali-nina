@@ -50,7 +50,12 @@ async function createFirebaseStore(cfg) {
       b.set(E, { key, createdAt: Date.now() });
       return b.commit();
     },
-    async joinAsEditor(key) { const s = await F.getDoc(E); if (!s.exists()) await F.setDoc(E, { key, createdAt: Date.now() }); },
+    async joinAsEditor(key) {
+      try { const s = await F.getDoc(E); if (!s.exists()) await F.setDoc(E, { key, createdAt: Date.now() }); }
+      catch (e) { throw e && e.code === 'permission-denied' ? err('badpass') : e; }
+    },
+    addKey: key => F.setDoc(K(key), { createdAt: Date.now() }),
+    leave: () => F.deleteDoc(E),
     addItem: data => F.setDoc(I(newId()), { ...data, status: 'free', takenUid: '', takenAt: 0, createdAt: Date.now() }),
     updateItem: (iid, data) => F.updateDoc(I(iid), data),
     deleteItem: iid => F.deleteDoc(I(iid)),
@@ -88,7 +93,7 @@ function createLocalStore() {
   let uid = ls.get(LIST_ID + '-demo-uid', null);
   if (!uid) { uid = newId(12); ls.set(LIST_ID + '-demo-uid', uid); }
   // In demo chi apre la pagina è il genitore
-  if (!load().list) save({ list: { child: CHILD_NAME, ownerUid: uid, editors: [uid] }, items: {} });
+  if (!load().list) save({ list: { child: CHILD_NAME, ownerUid: uid, editors: [uid], keys: [] }, items: {} });
 
   return {
     mode: 'demo', uid,
@@ -96,7 +101,9 @@ function createLocalStore() {
     watchItems: cb => sub(() => cb(Object.entries(load().items).map(([id, v]) => ({ id, ...v })))),
     watchEditor: cb => sub(() => cb((load().list?.editors || []).includes(uid))),
     async setup() { },
-    async joinAsEditor() { },
+    async joinAsEditor(key) { edit(d => { if (!(d.list.keys || []).includes(key)) throw err('badpass'); d.list.editors = [...new Set([...(d.list.editors || []), uid])]; }); },
+    async addKey(key) { edit(d => { d.list.keys = [...new Set([...(d.list.keys || []), key])]; }); },
+    async leave() { edit(d => { d.list.editors = (d.list.editors || []).filter(x => x !== uid); }); },
     async addItem(data) { edit(d => { d.items[newId()] = { ...data, status: 'free', takenUid: '', takenAt: 0, createdAt: Date.now() }; }); },
     async updateItem(iid, data) { edit(d => { if (!d.items[iid]) throw err('gone'); Object.assign(d.items[iid], data); }); },
     async deleteItem(iid) { edit(d => { delete d.items[iid]; }); },
@@ -115,15 +122,24 @@ function createLocalStore() {
 /* ───────────── Stato ───────────── */
 const S = {
   store: null, list: undefined, items: [], editor: false, preview: false,
-  key: ls.get(LIST_ID + '-key', ''), slow: false, setupMode: false, leaving: new Set()
+  slow: false, setupMode: false, leaving: new Set()
 };
 const app = $('#app');
 const canEdit = () => S.editor && !S.preview;
+// La password non è mai salvata: nel database finisce solo la sua impronta SHA-256
+async function hashPass(pw) {
+  const data = new TextEncoder().encode(LIST_ID + ':' + String(pw).trim());
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
 const fail = e => { console.error(e); toast(e && e.code === 'gone' ? 'Questo regalo non c\'è più' : 'Qualcosa è andato storto, riprova'); };
 
 /* ───────────── Render ───────────── */
 function render() {
-  $('.menu-btn').classList.toggle('hide', !S.editor);
+  const mb = $('.menu-btn');
+  mb.classList.toggle('hide', S.list === undefined || (S.list === null && !S.setupMode));
+  mb.textContent = S.editor ? '⋯' : '🔒';
+  mb.setAttribute('aria-label', S.editor ? 'Menu' : 'Area genitori');
   const edit = canEdit();
 
   if (S.list === undefined) {
@@ -164,6 +180,7 @@ function render() {
   }
 
   const open = app.querySelector('details.taken')?.open;
+  if (!S.editor) html += `<div class="parents"><button class="btn btn-line btn-sm" data-action="login">🔒 Area genitori</button></div>`;
   app.innerHTML = `<main>${html}</main>${edit ? `<button class="btn btn-red fab" data-action="add">＋ Aggiungi regalo</button>` : ''}`;
   if (open) app.querySelector('details.taken')?.setAttribute('open', '');
 }
@@ -248,23 +265,22 @@ function itemMenu(it) {
   });
 }
 
-function mainMenu(justCreated = false) {
+function mainMenu() {
   const link = baseUrl();
-  const admin = S.key ? baseUrl() + '#admin-' + S.key : '';
   const msg = `🎄 Il primo Natale di ${CHILD_NAME}! Ecco la sua lista dei regali: ${link}`;
-  const adminMsg = `✏️ Link per gestire la lista regali di ${CHILD_NAME} (aggiungere e modificare i regali). È solo per mamma e papà, non inoltrarlo: ${admin}`;
-  openModal(`<h2>${justCreated ? `La lista di ${esc(CHILD_NAME)} è pronta ✨` : `Lista di ${esc(CHILD_NAME)}`}</h2>
-    ${justCreated ? `<p class="lead">Ecco i due link da mandare. Li ritrovi sempre nel menu ⋯ in alto a sinistra.</p>` : ''}
-    ${admin ? `<div class="label">Per mamma e papà</div>
-    <p class="lead" style="font-size:14px;margin:0 0 8px">Chi apre questo link può aggiungere, modificare ed eliminare i regali.</p>
-    <div class="share-box"><code>${esc(admin)}</code><button class="btn btn-soft btn-sm" data-copy="${esc(admin)}">Copia</button></div>
-    <a class="btn btn-line btn-block" style="margin-top:10px" href="https://wa.me/?text=${encodeURIComponent(adminMsg)}" target="_blank" rel="noopener">💬 Invia su WhatsApp</a>` : ''}
+  openModal(`<h2>Lista di ${esc(CHILD_NAME)}</h2>
     <div class="label">Per parenti e amici</div>
     <div class="share-box"><code>${esc(link)}</code><button class="btn btn-fir btn-sm" data-copy="${esc(link)}">Copia</button></div>
     <div class="menu-list" style="margin-top:10px">
       <a class="btn btn-line btn-block" href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">💬 Invia su WhatsApp</a>
       ${navigator.share ? `<button class="btn btn-line btn-block" data-native style="justify-content:center">📤 Altre app…</button>` : ''}
       <button data-preview>👀 Vedi come la vedono gli altri</button>
+    </div>
+    <div class="label">Mamma e papà</div>
+    <p class="lead" style="font-size:14px;margin:0 0 8px">Dall'altro telefono basta toccare il lucchetto 🔒 e inserire la password.</p>
+    <div class="menu-list">
+      <button data-setpass>🔑 Imposta la password genitori</button>
+      <button data-leave>🔓 Esci dall'area genitori su questo telefono</button>
     </div>`,
     (el, close) => {
       el.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
@@ -274,7 +290,51 @@ function mainMenu(justCreated = false) {
       const n = el.querySelector('[data-native]');
       if (n) n.onclick = async () => { try { await navigator.share({ title: `Lista regali di ${CHILD_NAME}`, text: msg }); } catch { } };
       el.querySelector('[data-preview]').onclick = () => { close(); S.preview = true; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+      el.querySelector('[data-setpass]').onclick = () => { close(); passwordForm('set'); };
+      el.querySelector('[data-leave]').onclick = () => { close(); S.store.leave().then(() => toast('Sei uscita dall\'area genitori')).catch(fail); };
     });
+}
+
+// mode: 'login' (mamma/papà entrano) · 'set' (nuova password) · 'setup' (prima preparazione della lista)
+function passwordForm(mode) {
+  const twice = mode !== 'login';
+  const title = { login: 'Area genitori', set: 'Password genitori', setup: `Prepara la lista di ${CHILD_NAME}` }[mode];
+  const lead = {
+    login: `Inserisci la password per aggiungere e modificare i regali di ${CHILD_NAME}.`,
+    set: 'Mamma e papà la useranno per entrare dal lucchetto 🔒. Le password già impostate restano valide.',
+    setup: 'Scegli la password con cui mamma e papà entreranno dal lucchetto 🔒 per gestire la lista.'
+  }[mode];
+  openModal(`<h2>${esc(title)}</h2><p class="lead">${esc(lead)}</p>
+    <form>
+      <label class="field"><span>Password</span><input class="input" name="p1" type="password" inputmode="numeric" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}" required minlength="4"></label>
+      ${twice ? `<label class="field"><span>Ripeti la password</span><input class="input" name="p2" type="password" inputmode="numeric" autocomplete="new-password" required minlength="4"></label>` : ''}
+      <p class="lead hide" data-err style="color:var(--red);margin:-4px 0 10px"></p>
+      <div class="foot"><button type="button" class="btn btn-line" data-close>Annulla</button><button class="btn btn-red">${mode === 'login' ? 'Entra' : 'Conferma'}</button></div>
+    </form>`, (el, close) => {
+    const f = el.querySelector('form'), errBox = el.querySelector('[data-err]');
+    const showErr = t => { errBox.textContent = t; errBox.classList.remove('hide'); };
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const p1 = f.p1.value.trim();
+      if (p1.length < 4) return showErr('Almeno 4 caratteri.');
+      if (twice && p1 !== f.p2.value.trim()) return showErr('Le due password non coincidono.');
+      const btn = f.querySelector('.btn-red'); btn.disabled = true;
+      try {
+        const key = await hashPass(p1);
+        if (mode === 'login') { await S.store.joinAsEditor(key); close(); toast('Benvenuti! Ora potete modificare la lista ✏️'); }
+        if (mode === 'set') { await S.store.addKey(key); close(); toast('Password impostata 🔑'); }
+        if (mode === 'setup') {
+          await S.store.setup(key); S.setupMode = false;
+          try { history.replaceState(null, '', baseUrl()); } catch { }
+          close(); toast('Lista pronta ✨'); render();
+        }
+      } catch (er) {
+        btn.disabled = false;
+        if (er.code === 'badpass') { showErr('Password non corretta.'); f.p1.select(); }
+        else { console.error(er); showErr('Qualcosa è andato storto, riprova.'); }
+      }
+    };
+  });
 }
 
 /* ───────────── Eventi ───────────── */
@@ -283,23 +343,14 @@ document.addEventListener('click', async e => {
   if (!b || b.closest('#modal-root')) return;
   const id = b.dataset.id, it = id && S.items.find(x => x.id === id);
   switch (b.dataset.action) {
-    case 'menu': mainMenu(); break;
+    case 'menu': S.editor ? mainMenu() : passwordForm('login'); break;
     case 'add': itemForm(); break;
     case 'item-menu': if (it) itemMenu(it); break;
     case 'take': if (it) confirmTake(it); break;
     case 'untake': S.store.untake(id).catch(fail); break;
     case 'preview': S.preview = !S.preview; render(); break;
-    case 'setup': {
-      const key = newId(24);
-      b.disabled = true;
-      try {
-        await S.store.setup(key);
-        S.key = key; ls.set(LIST_ID + '-key', key); S.setupMode = false;
-        try { history.replaceState(null, '', baseUrl()); } catch { }
-        render(); mainMenu(true);
-      } catch (er) { b.disabled = false; fail(er); }
-      break;
-    }
+    case 'setup': passwordForm('setup'); break;
+    case 'login': passwordForm('login'); break;
   }
 });
 
@@ -322,18 +373,9 @@ async function boot() {
     console.error(e);
     S.store = createLocalStore();
   }
-  // In anteprima mostro comunque il link "per mamma e papà"
-  if (S.store.mode === 'demo' && !S.key) { S.key = newId(24); ls.set(LIST_ID + '-key', S.key); }
 
-  // #setup: primo avvio del genitore · #admin-<chiave>: altri dispositivi del genitore
-  const h = location.hash;
-  const m = h.match(/^#admin-([A-Za-z0-9]{20,60})$/);
-  if (h === '#setup') S.setupMode = true;
-  if (m) {
-    S.key = m[1]; ls.set(LIST_ID + '-key', m[1]);
-    S.store.joinAsEditor(m[1]).then(() => toast('Benvenuti! Ora potete modificare la lista ✏️')).catch(e => { console.error(e); toast('Link non valido'); });
-    try { history.replaceState(null, '', baseUrl()); } catch { }
-  }
+  // #setup: prima preparazione della lista
+  if (location.hash === '#setup') S.setupMode = true;
 
   const timer = setTimeout(() => { if (S.list === undefined) { S.slow = true; render(); } }, 10000);
   S.store.watchList(l => { clearTimeout(timer); S.slow = false; S.list = l; render(); }, e => { console.error(e); S.list = null; render(); });
