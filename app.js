@@ -1,6 +1,6 @@
 import { firebaseConfig } from './firebase-config.js';
 import { CHILD_NAME, LIST_ID } from './lista.js';
-const APP_VERSION = '11';
+const APP_VERSION = '14';
 
 /* ───────────── Utilità ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -8,6 +8,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const ALPHA = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const newId = (n = 20) => [...crypto.getRandomValues(new Uint8Array(n))].map(x => ALPHA[x % ALPHA.length]).join('');
 const err = code => Object.assign(new Error(code), { code });
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(err('timeout')), ms))]);
 const mem = {};
 const ls = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? (k in mem ? mem[k] : d) : JSON.parse(v); } catch { return k in mem ? mem[k] : d; } },
@@ -28,10 +29,14 @@ async function createFirebaseStore(cfg) {
   const [{ initializeApp }, A, F] = await Promise.all([
     import(base + 'firebase-app.js'), import(base + 'firebase-auth.js'), import(base + 'firebase-firestore.js')]);
   const app = initializeApp(cfg);
+  // Niente IndexedDB: nelle app aggiunte alla Home di iPhone a volte si blocca.
+  // La lista si legge dal server (cache in memoria) e l'accesso anonimo resta nel localStorage.
   let db;
-  try { db = F.initializeFirestore(app, { localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() }) }); }
+  try { db = F.initializeFirestore(app, { localCache: F.memoryLocalCache() }); }
   catch { db = F.getFirestore(app); }
-  const auth = A.getAuth(app);
+  let auth;
+  try { auth = A.initializeAuth(app, { persistence: [A.browserLocalPersistence, A.inMemoryPersistence] }); }
+  catch { auth = A.getAuth(app); }
   if (!auth.currentUser) await A.signInAnonymously(auth);
   const uid = auth.currentUser.uid;
   const L = F.doc(db, 'lists', LIST_ID);
@@ -333,8 +338,8 @@ function passwordForm(mode) {
       const btn = f.querySelector('.btn-red'); btn.disabled = true;
       try {
         const key = await hashPass(p1);
-        if (mode === 'login') { await S.store.joinAsEditor(key); close(); toast('Benvenuti! Ora potete modificare la lista ✏️'); setTimeout(() => maybeHomeScreen(true), 1200); }
-        if (mode === 'set') { await S.store.addKey(key); close(); toast('Password impostata 🔑'); }
+        if (mode === 'login') { await withTimeout(S.store.joinAsEditor(key), 15000); close(); toast('Benvenuti! Ora potete modificare la lista ✏️'); setTimeout(() => maybeHomeScreen(true), 1200); }
+        if (mode === 'set') { await withTimeout(S.store.addKey(key), 15000); close(); toast('Password impostata 🔑'); }
         if (mode === 'setup') {
           await S.store.setup(key); S.setupMode = false;
           try { history.replaceState(null, '', baseUrl()); } catch { }
@@ -345,6 +350,7 @@ function passwordForm(mode) {
         const code = (er && er.code) || '?';
         if (code !== 'badpass') console.error(er);
         if (code === 'badpass') { showErr('Password non corretta.'); f.p1.select(); }
+        else if (code === 'timeout') showErr("La connessione non risponde. Chiudi completamente l'app (scorri via dalle app aperte), riaprila e riprova.");
         else if (code.startsWith('auth:') || code.startsWith('write:')) showErr(`Il telefono non riesce ad accedere alla lista. Chiudi e riapri l'app, poi riprova. (codice: ${code})`);
         else showErr(`Connessione non riuscita, riprova tra poco. (codice: ${code})`);
       }
@@ -431,10 +437,13 @@ function toast(msg, actionLabel, action) {
 async function boot() {
   render();
   try {
-    S.store = firebaseConfig && firebaseConfig.apiKey ? await createFirebaseStore(firebaseConfig) : createLocalStore();
+    S.store = firebaseConfig && firebaseConfig.apiKey ? await withTimeout(createFirebaseStore(firebaseConfig), 20000) : createLocalStore();
   } catch (e) {
     console.error(e);
-    S.store = createLocalStore();
+    app.innerHTML = `<main><div class="empty"><div class="big">📶</div><p>Connessione non riuscita</p>
+      <button class="btn btn-red" style="margin-top:12px" onclick="location.reload()">Riprova</button>
+      <div class="ver">v${APP_VERSION} · ${esc((e && e.code) || 'errore')}</div></div></main>`;
+    return;
   }
 
   // #setup: prima preparazione della lista
