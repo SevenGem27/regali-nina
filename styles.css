@@ -115,3 +115,6 @@ details.taken[open] summary::after{content:"－"}
 /* Tasto discreto per mamma e papà, in fondo alla lista */
 .parents{text-align:center;margin:26px 0 0}
 .parents .btn{background:rgba(255,250,243,.8);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.parents{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.home-steps{margin:16px 0 8px;padding:14px 16px 14px 34px;background:var(--cream);border-radius:16px;line-height:1.5}
+.home-steps li{margin:6px 0}

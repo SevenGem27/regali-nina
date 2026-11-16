@@ -1,5 +1,5 @@
 // Service worker: l'app si apre anche offline (i dati li gestisce la cache di Firestore).
-const CACHE = 'nina-v8';
+const CACHE = 'nina-v9';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'firebase-config.js', 'lista.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/apple-touch-icon.png', 'img/bg-portrait.jpg', 'img/bg-landscape.jpg'];
 

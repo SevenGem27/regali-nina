@@ -180,7 +180,8 @@ function render() {
   }
 
   const open = app.querySelector('details.taken')?.open;
-  if (!S.editor) html += `<div class="parents"><button class="btn btn-line btn-sm" data-action="login">🔒 Area genitori</button></div>`;
+  const homeBtn = canOfferHome() ? `<button class="btn btn-line btn-sm" data-action="home">📲 Aggiungi alla Home</button>` : '';
+  if (!S.editor || homeBtn) html += `<div class="parents">${!S.editor ? `<button class="btn btn-line btn-sm" data-action="login">🔒 Area genitori</button>` : ''}${homeBtn}</div>`;
   app.innerHTML = `<main>${html}</main>${edit ? `<button class="btn btn-red fab" data-action="add">＋ Aggiungi regalo</button>` : ''}`;
   if (open) app.querySelector('details.taken')?.setAttribute('open', '');
 }
@@ -321,7 +322,7 @@ function passwordForm(mode) {
       const btn = f.querySelector('.btn-red'); btn.disabled = true;
       try {
         const key = await hashPass(p1);
-        if (mode === 'login') { await S.store.joinAsEditor(key); close(); toast('Benvenuti! Ora potete modificare la lista ✏️'); }
+        if (mode === 'login') { await S.store.joinAsEditor(key); close(); toast('Benvenuti! Ora potete modificare la lista ✏️'); setTimeout(() => maybeHomeScreen(true), 1200); }
         if (mode === 'set') { await S.store.addKey(key); close(); toast('Password impostata 🔑'); }
         if (mode === 'setup') {
           await S.store.setup(key); S.setupMode = false;
@@ -335,6 +336,53 @@ function passwordForm(mode) {
       }
     };
   });
+}
+
+/* ───────────── Aggiungi alla schermata Home ───────────── */
+const UA = navigator.userAgent || '';
+const isIOS = /iPhone|iPad|iPod/i.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroid = /Android/i.test(UA);
+const inAppBrowser = /FBAN|FBAV|Instagram|Line\/|; wv\)|GSA\//i.test(UA);
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; });
+window.addEventListener('appinstalled', () => { installEvt = null; closeModal(); toast('Fatto! La trovi sulla schermata Home 🎄'); });
+
+const SHARE_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2f6fd6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8"/></svg>`;
+const PLUS_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3a2b22" stroke-width="2" stroke-linecap="round" style="vertical-align:-4px"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>`;
+const canOfferHome = () => (isIOS || isAndroid) && !isStandalone();
+
+function homeScreenSheet() {
+  let steps;
+  if (inAppBrowser) {
+    steps = `<li>Tocca il menu <b>⋯</b> o <b>⋮</b> in alto a destra</li>
+      <li>Scegli <b>Apri in ${isIOS ? 'Safari' : 'Chrome'}</b> (o <b>Apri nel browser</b>)</li>
+      <li>Riapri questo messaggio da lì e segui i passaggi</li>`;
+  } else if (isIOS) {
+    steps = `<li>Tocca <b>Condividi</b> ${SHARE_ICON} ${/CriOS|FxiOS/.test(UA) ? 'in alto a destra' : 'nella barra in basso (su iPad in alto)'}</li>
+      <li>Scorri e scegli <b>Aggiungi alla schermata Home</b> ${PLUS_ICON}</li>
+      <li>Tocca <b>Aggiungi</b> in alto a destra</li>`;
+  } else {
+    steps = `<li>Tocca il menu <b>⋮</b> in alto a destra</li>
+      <li>Scegli <b>Aggiungi a schermata Home</b> (o <b>Installa app</b>)</li>
+      <li>Conferma con <b>Aggiungi</b> / <b>Installa</b></li>`;
+  }
+  openModal(`<div style="text-align:center"><img src="icons/icon-192.png" alt="" width="72" height="72" style="border-radius:18px;box-shadow:var(--shadow)"></div>
+    <h2 style="text-align:center;margin-top:12px">Tienila sempre a portata di mano</h2>
+    <p class="lead" style="text-align:center">Aggiungi la lista di ${esc(CHILD_NAME)} alla schermata Home: si apre come un'app ed è sempre aggiornata.</p>
+    ${installEvt && !inAppBrowser ? `<button class="btn btn-red btn-block" data-install>📲 Installa sulla schermata Home</button>
+      <p class="lead" style="text-align:center;font-size:13px;margin:10px 0 0">Oppure:</p>` : ''}
+    <ol class="home-steps">${steps}</ol>
+    <div class="foot"><button class="btn btn-line" data-close>Ho capito</button></div>`, (el, close) => {
+    const i = el.querySelector('[data-install]');
+    if (i) i.onclick = async () => { try { installEvt.prompt(); const r = await installEvt.userChoice; if (r.outcome === 'accepted') close(); } catch { } installEvt = null; };
+  });
+  ls.set(LIST_ID + '-home-seen', 1);
+}
+function maybeHomeScreen(force = false) {
+  if (!canOfferHome() || $('#modal-root').children.length) return;
+  if (!force && ls.get(LIST_ID + '-home-seen', 0)) return;
+  homeScreenSheet();
 }
 
 /* ───────────── Eventi ───────────── */
@@ -351,6 +399,7 @@ document.addEventListener('click', async e => {
     case 'preview': S.preview = !S.preview; render(); break;
     case 'setup': passwordForm('setup'); break;
     case 'login': passwordForm('login'); break;
+    case 'home': homeScreenSheet(); break;
   }
 });
 
@@ -378,7 +427,11 @@ async function boot() {
   if (location.hash === '#setup') S.setupMode = true;
 
   const timer = setTimeout(() => { if (S.list === undefined) { S.slow = true; render(); } }, 10000);
-  S.store.watchList(l => { clearTimeout(timer); S.slow = false; S.list = l; render(); }, e => { console.error(e); S.list = null; render(); });
+  let homeOffered = false;
+  S.store.watchList(l => {
+    clearTimeout(timer); S.slow = false; S.list = l; render();
+    if (!homeOffered && l && !S.setupMode) { homeOffered = true; setTimeout(() => maybeHomeScreen(), 900); }
+  }, e => { console.error(e); S.list = null; render(); });
   S.store.watchItems(items => { S.items = items; render(); }, e => console.error(e));
   S.store.watchEditor(v => { S.editor = v; render(); });
 
