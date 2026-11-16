@@ -128,7 +128,8 @@ const app = $('#app');
 const canEdit = () => S.editor && !S.preview;
 // La password non è mai salvata: nel database finisce solo la sua impronta SHA-256
 async function hashPass(pw) {
-  const data = new TextEncoder().encode(LIST_ID + ':' + String(pw).trim());
+  const clean = String(pw).normalize('NFKC').replace(/\s+/g, '');
+  const data = new TextEncoder().encode(LIST_ID + ':' + clean);
   const buf = await crypto.subtle.digest('SHA-256', data);
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -307,8 +308,8 @@ function passwordForm(mode) {
   }[mode];
   openModal(`<h2>${esc(title)}</h2><p class="lead">${esc(lead)}</p>
     <form>
-      <label class="field"><span>Password</span><input class="input" name="p1" type="password" inputmode="numeric" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}" required minlength="4"></label>
-      ${twice ? `<label class="field"><span>Ripeti la password</span><input class="input" name="p2" type="password" inputmode="numeric" autocomplete="new-password" required minlength="4"></label>` : ''}
+      <label class="field"><span>Password</span><input class="input pin" name="p1" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" required minlength="4"></label>
+      ${twice ? `<label class="field"><span>Ripeti la password</span><input class="input pin" name="p2" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" required minlength="4"></label>` : ''}
       <p class="lead hide" data-err style="color:var(--red);margin:-4px 0 10px"></p>
       <div class="foot"><button type="button" class="btn btn-line" data-close>Annulla</button><button class="btn btn-red">${mode === 'login' ? 'Entra' : 'Conferma'}</button></div>
     </form>`, (el, close) => {
@@ -316,9 +317,9 @@ function passwordForm(mode) {
     const showErr = t => { errBox.textContent = t; errBox.classList.remove('hide'); };
     f.onsubmit = async e => {
       e.preventDefault();
-      const p1 = f.p1.value.trim();
+      const p1 = f.p1.value.replace(/\s+/g, '');
       if (p1.length < 4) return showErr('Almeno 4 caratteri.');
-      if (twice && p1 !== f.p2.value.trim()) return showErr('Le due password non coincidono.');
+      if (twice && p1 !== f.p2.value.replace(/\s+/g, '')) return showErr('Le due password non coincidono.');
       const btn = f.querySelector('.btn-red'); btn.disabled = true;
       try {
         const key = await hashPass(p1);
@@ -332,7 +333,7 @@ function passwordForm(mode) {
       } catch (er) {
         btn.disabled = false;
         if (er.code === 'badpass') { showErr('Password non corretta.'); f.p1.select(); }
-        else { console.error(er); showErr('Qualcosa è andato storto, riprova.'); }
+        else { console.error(er); showErr('Connessione non riuscita, riprova tra poco.' + (er && er.code ? ` (${er.code})` : '')); }
       }
     };
   });
