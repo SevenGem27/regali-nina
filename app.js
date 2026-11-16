@@ -1,5 +1,6 @@
 import { firebaseConfig } from './firebase-config.js';
 import { CHILD_NAME, LIST_ID } from './lista.js';
+const APP_VERSION = '11';
 
 /* ───────────── Utilità ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -51,8 +52,16 @@ async function createFirebaseStore(cfg) {
       return b.commit();
     },
     async joinAsEditor(key) {
-      try { const s = await F.getDoc(E); if (!s.exists()) await F.setDoc(E, { key, createdAt: Date.now() }); }
-      catch (e) { throw e && e.code === 'permission-denied' ? err('badpass') : e; }
+      // 1) la password esiste? (chiesto sempre al server, mai alla copia sul telefono)
+      let k;
+      try { k = await F.getDocFromServer(K(key)); }
+      catch (e) { throw err(e && e.code === 'permission-denied' ? 'auth:' + e.code : (e && e.code) || 'unavailable'); }
+      if (!k.exists()) throw err('badpass');
+      // 2) questo telefono è già dentro?
+      try { const s = await F.getDocFromServer(E); if (s.exists()) return; } catch { }
+      // 3) entro
+      try { await F.setDoc(E, { key, createdAt: Date.now() }); }
+      catch (e) { throw err('write:' + ((e && e.code) || '?')); }
     },
     addKey: key => F.setDoc(K(key), { createdAt: Date.now() }),
     leave: () => F.deleteDoc(E),
@@ -183,6 +192,7 @@ function render() {
   const open = app.querySelector('details.taken')?.open;
   const homeBtn = canOfferHome() ? `<button class="btn btn-line btn-sm" data-action="home">📲 Aggiungi alla Home</button>` : '';
   if (!S.editor || homeBtn) html += `<div class="parents">${!S.editor ? `<button class="btn btn-line btn-sm" data-action="login">🔒 Area genitori</button>` : ''}${homeBtn}</div>`;
+  html += `<div class="ver">v${APP_VERSION}${isStandalone() ? ' · app' : ''}</div>`;
   app.innerHTML = `<main>${html}</main>${edit ? `<button class="btn btn-red fab" data-action="add">＋ Aggiungi regalo</button>` : ''}`;
   if (open) app.querySelector('details.taken')?.setAttribute('open', '');
 }
@@ -332,8 +342,11 @@ function passwordForm(mode) {
         }
       } catch (er) {
         btn.disabled = false;
-        if (er.code === 'badpass') { showErr('Password non corretta.'); f.p1.select(); }
-        else { console.error(er); showErr('Connessione non riuscita, riprova tra poco.' + (er && er.code ? ` (${er.code})` : '')); }
+        const code = (er && er.code) || '?';
+        if (code !== 'badpass') console.error(er);
+        if (code === 'badpass') { showErr('Password non corretta.'); f.p1.select(); }
+        else if (code.startsWith('auth:') || code.startsWith('write:')) showErr(`Il telefono non riesce ad accedere alla lista. Chiudi e riapri l'app, poi riprova. (codice: ${code})`);
+        else showErr(`Connessione non riuscita, riprova tra poco. (codice: ${code})`);
       }
     };
   });
@@ -436,6 +449,15 @@ async function boot() {
   S.store.watchItems(items => { S.items = items; render(); }, e => console.error(e));
   S.store.watchEditor(v => { S.editor = v; render(); });
 
-  if ('serviceWorker' in navigator) { try { await navigator.serviceWorker.register('sw.js'); } catch { } }
+  if ('serviceWorker' in navigator) {
+    try {
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+      const reg = await navigator.serviceWorker.register('sw.js');
+      reg.update().catch(() => { });
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => { }); });
+    } catch { }
+  }
 }
 boot();

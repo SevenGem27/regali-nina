@@ -119,3 +119,4 @@ details.taken[open] summary::after{content:"－"}
 .home-steps{margin:16px 0 8px;padding:14px 16px 14px 34px;background:var(--cream);border-radius:16px;line-height:1.5}
 .home-steps li{margin:6px 0}
 .input.pin{-webkit-text-security:disc;letter-spacing:4px;font-size:20px}
+.ver{text-align:center;font-size:11px;color:rgba(58,43,34,.45);margin-top:22px}
