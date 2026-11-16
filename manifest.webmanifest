@@ -1,0 +1,16 @@
+{
+  "name": "Lista regali di Nina",
+  "short_name": "Nina",
+  "description": "Il primo Natale di Nina: scegli un regalo dalla lista.",
+  "lang": "it",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4ece1",
+  "theme_color": "#f4ece1",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
