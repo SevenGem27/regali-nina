@@ -1,6 +1,6 @@
 import { firebaseConfig } from './firebase-config.js';
-import { CHILD_NAME, LIST_ID } from './lista.js';
-const APP_VERSION = '15';
+import { CHILD_NAME, LIST_ID, FIRST_XMAS } from './lista.js';
+const APP_VERSION = '16';
 
 /* ───────────── Utilità ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -68,7 +68,20 @@ async function createFirebaseStore(cfg) {
       try { await F.setDoc(E, { key, createdAt: Date.now() }); }
       catch (e) { throw err('write:' + ((e && e.code) || '?')); }
     },
-    addKey: key => F.setDoc(K(key), { createdAt: Date.now() }),
+    // Nuova password: resta valida solo lei. Con kickOthers escono anche gli altri telefoni.
+    async changePassword(key, kickOthers) {
+      await F.setDoc(K(key), { createdAt: Date.now() });
+      let ks, es = null;
+      try {
+        ks = await F.getDocs(F.collection(db, 'lists', LIST_ID, 'keys'));
+        if (kickOthers) es = await F.getDocs(F.collection(db, 'lists', LIST_ID, 'editors'));
+      } catch (e) { throw err(e && e.code === 'permission-denied' ? 'rules' : (e && e.code) || 'unavailable'); }
+      const b = F.writeBatch(db);
+      ks.docs.forEach(d => { if (d.id !== key) b.delete(d.ref); });
+      if (es) es.docs.forEach(d => { if (d.id !== uid) b.delete(d.ref); });
+      await b.commit();
+      return { removed: ks.docs.filter(d => d.id !== key).length, kicked: es ? es.docs.filter(d => d.id !== uid).length : 0 };
+    },
     leave: () => F.deleteDoc(E),
     addItem: data => F.setDoc(I(newId()), { ...data, status: 'free', takenUid: '', takenAt: 0, createdAt: Date.now() }),
     updateItem: (iid, data) => F.updateDoc(I(iid), data),
@@ -116,7 +129,12 @@ function createLocalStore() {
     watchEditor: cb => sub(() => cb((load().list?.editors || []).includes(uid))),
     async setup() { },
     async joinAsEditor(key) { edit(d => { if (!(d.list.keys || []).includes(key)) throw err('badpass'); d.list.editors = [...new Set([...(d.list.editors || []), uid])]; }); },
-    async addKey(key) { edit(d => { d.list.keys = [...new Set([...(d.list.keys || []), key])]; }); },
+    async changePassword(key, kickOthers) {
+      let r = {};
+      edit(d => { r.removed = (d.list.keys || []).filter(k => k !== key).length; d.list.keys = [key];
+        if (kickOthers) { r.kicked = (d.list.editors || []).filter(x => x !== uid).length; d.list.editors = [uid]; } });
+      return r;
+    },
     async leave() { edit(d => { d.list.editors = (d.list.editors || []).filter(x => x !== uid); }); },
     async addItem(data) { edit(d => { d.items[newId()] = { ...data, status: 'free', takenUid: '', takenAt: 0, createdAt: Date.now() }; }); },
     async updateItem(iid, data) { edit(d => { if (!d.items[iid]) throw err('gone'); Object.assign(d.items[iid], data); }); },
@@ -142,7 +160,7 @@ const app = $('#app');
 const canEdit = () => S.editor && !S.preview;
 // La password non è mai salvata: nel database finisce solo la sua impronta SHA-256
 async function hashPass(pw) {
-  const clean = String(pw).normalize('NFKC').replace(/\s+/g, '');
+  const clean = String(pw).normalize('NFKC').replace(/[\s\/.\-]+/g, '');
   const data = new TextEncoder().encode(LIST_ID + ':' + clean);
   const buf = await crypto.subtle.digest('SHA-256', data);
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -300,7 +318,7 @@ function itemMenu(it) {
 
 function mainMenu() {
   const link = baseUrl();
-  const msg = `🎄 Il primo Natale di ${CHILD_NAME}! Ecco la sua lista dei regali: ${link}`;
+  const msg = FIRST_XMAS ? `🎄 Il primo Natale di ${CHILD_NAME}! Ecco la sua lista dei regali: ${link}` : `🎄 Natale si avvicina! Ecco la lista dei regali di ${CHILD_NAME}: ${link}`;
   openModal(`<h2>Lista di ${esc(CHILD_NAME)}</h2>
     <div class="label">Per parenti e amici</div>
     <div class="share-box"><code>${esc(link)}</code><button class="btn btn-fir btn-sm" data-copy="${esc(link)}">Copia</button></div>
@@ -312,7 +330,7 @@ function mainMenu() {
     <div class="label">Mamma e papà</div>
     <p class="lead" style="font-size:14px;margin:0 0 8px">Dall'altro telefono basta toccare il lucchetto 🔒 e inserire la password.</p>
     <div class="menu-list">
-      <button data-setpass>🔑 Imposta la password genitori</button>
+      <button data-setpass>🔑 Cambia la password genitori</button>
       <button data-leave>🔓 Esci dall'area genitori su questo telefono</button>
     </div>`,
     (el, close) => {
@@ -331,16 +349,17 @@ function mainMenu() {
 // mode: 'login' (mamma/papà entrano) · 'set' (nuova password) · 'setup' (prima preparazione della lista)
 function passwordForm(mode) {
   const twice = mode !== 'login';
-  const title = { login: 'Area genitori', set: 'Password genitori', setup: `Prepara la lista di ${CHILD_NAME}` }[mode];
+  const title = { login: 'Area genitori', set: 'Cambia password', setup: `Prepara la lista di ${CHILD_NAME}` }[mode];
   const lead = {
     login: `Inserisci la password per aggiungere e modificare i regali di ${CHILD_NAME}.`,
-    set: 'Mamma e papà la useranno per entrare dal lucchetto 🔒. Le password già impostate restano valide.',
+    set: 'Mamma e papà la useranno per entrare dal lucchetto 🔒. Le password precedenti smettono di funzionare.',
     setup: 'Scegli la password con cui mamma e papà entreranno dal lucchetto 🔒 per gestire la lista.'
   }[mode];
   openModal(`<h2>${esc(title)}</h2><p class="lead">${esc(lead)}</p>
     <form>
       <label class="field"><span>Password</span><input class="input pin" name="p1" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" required minlength="4"></label>
       ${twice ? `<label class="field"><span>Ripeti la password</span><input class="input pin" name="p2" type="text" inputmode="numeric" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" required minlength="4"></label>` : ''}
+      ${mode === 'set' ? `<label class="check"><input type="checkbox" name="kick"> <span>Fai uscire anche gli altri telefoni già entrati: dovranno inserire la nuova password</span></label>` : ''}
       <p class="lead hide" data-err style="color:var(--red);margin:-4px 0 10px"></p>
       <div class="foot"><button type="button" class="btn btn-line" data-close>Annulla</button><button class="btn btn-red">${mode === 'login' ? 'Entra' : 'Conferma'}</button></div>
     </form>`, (el, close) => {
@@ -348,14 +367,18 @@ function passwordForm(mode) {
     const showErr = t => { errBox.textContent = t; errBox.classList.remove('hide'); };
     f.onsubmit = async e => {
       e.preventDefault();
-      const p1 = f.p1.value.replace(/\s+/g, '');
+      const p1 = f.p1.value.replace(/[\s\/.\-]+/g, '');
       if (p1.length < 4) return showErr('Almeno 4 caratteri.');
-      if (twice && p1 !== f.p2.value.replace(/\s+/g, '')) return showErr('Le due password non coincidono.');
+      if (twice && p1 !== f.p2.value.replace(/[\s\/.\-]+/g, '')) return showErr('Le due password non coincidono.');
       const btn = f.querySelector('.btn-red'); btn.disabled = true;
       try {
         const key = await hashPass(p1);
         if (mode === 'login') { await withTimeout(S.store.joinAsEditor(key), 15000); close(); toast('Benvenuti! Ora potete modificare la lista ✏️'); setTimeout(() => maybeHomeScreen(true), 1200); }
-        if (mode === 'set') { await withTimeout(S.store.addKey(key), 15000); close(); toast('Password impostata 🔑'); }
+        if (mode === 'set') {
+          const kick = f.kick && f.kick.checked;
+          await withTimeout(S.store.changePassword(key, kick), 15000); close();
+          toast(kick ? 'Password cambiata: gli altri telefoni sono usciti 🔑' : 'Password cambiata: la vecchia non funziona più 🔑');
+        }
         if (mode === 'setup') {
           await S.store.setup(key); S.setupMode = false;
           try { history.replaceState(null, '', baseUrl()); } catch { }
@@ -365,7 +388,8 @@ function passwordForm(mode) {
         btn.disabled = false;
         const code = (er && er.code) || '?';
         if (code !== 'badpass') console.error(er);
-        if (code === 'badpass') { showErr('Password non corretta.'); f.p1.select(); }
+        if (code === 'rules') showErr('La nuova password funziona, ma le vecchie non sono state cancellate: vanno aggiornate le regole di Firebase.');
+        else if (code === 'badpass') { showErr('Password non corretta.'); f.p1.select(); }
         else if (code === 'timeout') showErr("La connessione non risponde. Chiudi completamente l'app (scorri via dalle app aperte), riaprila e riprova.");
         else if (code.startsWith('auth:') || code.startsWith('write:')) showErr(`Il telefono non riesce ad accedere alla lista. Chiudi e riapri l'app, poi riprova. (codice: ${code})`);
         else showErr(`Connessione non riuscita, riprova tra poco. (codice: ${code})`);
