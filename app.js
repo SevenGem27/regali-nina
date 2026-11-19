@@ -1,6 +1,6 @@
 import { firebaseConfig } from './firebase-config.js';
 import { CHILD_NAME, LIST_ID, FIRST_XMAS } from './lista.js';
-const APP_VERSION = '16';
+const APP_VERSION = '17';
 
 /* ───────────── Utilità ───────────── */
 const $ = (s, r = document) => r.querySelector(s);
@@ -410,7 +410,7 @@ window.addEventListener('appinstalled', () => { installEvt = null; closeModal();
 
 const SHARE_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2f6fd6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8"/></svg>`;
 const PLUS_ICON = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3a2b22" stroke-width="2" stroke-linecap="round" style="vertical-align:-4px"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>`;
-const canOfferHome = () => (isIOS || isAndroid) && !isStandalone();
+const canOfferHome = () => S.editor && !S.preview && (isIOS || isAndroid) && !isStandalone();
 
 function homeScreenSheet() {
   let steps;
@@ -493,10 +493,14 @@ async function boot() {
   let homeOffered = false;
   S.store.watchList(l => {
     clearTimeout(timer); S.slow = false; S.list = l; render();
-    if (!homeOffered && l && !S.setupMode) { homeOffered = true; setTimeout(() => maybeHomeScreen(), 900); }
+
   }, e => { console.error(e); S.list = null; render(); });
   S.store.watchItems(items => { S.items = items; render(); }, e => console.error(e));
-  S.store.watchEditor(v => { S.editor = v; render(); });
+  S.store.watchEditor(v => {
+    S.editor = v; render();
+    // il pop-up "aggiungi alla Home" lo vede solo chi gestisce la lista
+    if (v && !homeOffered && !S.setupMode) { homeOffered = true; setTimeout(() => maybeHomeScreen(), 900); }
+  });
 
   if ('serviceWorker' in navigator) {
     try {
